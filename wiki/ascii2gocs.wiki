@@ -126,7 +126,6 @@ find ~ -name '{{{*}}}.sh' -print | ascii2gdocs -a "ascii|shell scripts" -
 
 ----
 
-Run this program without arguments for useage information.
 
 Google Docs in this documentation means the same as Google Drive.
 
