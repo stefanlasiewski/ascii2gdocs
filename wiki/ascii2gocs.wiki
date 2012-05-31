@@ -122,7 +122,7 @@ EXAMPLE 5:
 To add all .sh files (shell scripts) under your home directory to folders 
 named "ascii" and "shell scripts" using the default style:
 
-find ~ -name '*.sh' -print | ascii2gdocs -a "ascii|shell scripts" -
+find ~ -name '{{{*}}}.sh' -print | ascii2gdocs -a "ascii|shell scripts" -
 
 
 
@@ -159,7 +159,7 @@ Run this program without arguments for useage information.
 
 Google Docs in this documentation means the same as Google Drive.
 
-This program is intended to enable *NIX/OSX command line users to
+This program is intended to enable {{{*}}}NIX/OSX command line users to
 programmatically add or update ascii files to Google Docs.  Local ascii files
 are converted into Google documents, where they can be edited from a browser,
 shared online, worked on collaboratively, have comments and revision histories,
