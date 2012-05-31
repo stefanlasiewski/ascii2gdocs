@@ -21,7 +21,7 @@ ascii2gdocs -F          displays formatting options
 
 To add files:  use the -a option
 
-ascii2gdocs -a file
+ascii2gdocs -a file<br>
 ascii2gdocs -a -
 
 
