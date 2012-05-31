@@ -2,4 +2,4 @@
 
 = Introduction =
 
-Documentation is self contained in the single file program (which is a shell script).  Run without arguments for help.
+Documentation is self contained in the program (which is a shell script).  Run it without arguments for help.
