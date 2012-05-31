@@ -124,35 +124,6 @@ named "ascii" and "shell scripts" using the default style:
 
 find ~ -name '{{{*}}}.sh' -print | ascii2gdocs -a "ascii|shell scripts" -
 
-
-
-EXAMPLE 6:
-
-To add a list of files to a folder named ascii, where the list is in
-an edited file:
-
-cat >> files_to_put
-.bash_profile
-Library/Application Support/Google/Chrome/Local State
-/etc/passwd
-/etc/pam.d/sshd
-ctrl-d
-
-cat files_to_put | ascii2gdocs -a "ascii" -
-
-
-
-EXAMPLE 7:
-
-To add more than one file, where the files are typed "interactively" 
-on the command line:
-
-ascii2gdocs -a - {{{[}}}hit return{{{]}}}
-Library/Application Support/Google/Chrome/Local State{{{[}}}hit return{{{]}}}
-.bash_profile{{{[}}}hit return{{{]}}}
-/etc/pam.d/sshd{{{[}}}hit return{{{]}}}
-ctrl-d
-
 ----
 
 Run this program without arguments for useage information.
