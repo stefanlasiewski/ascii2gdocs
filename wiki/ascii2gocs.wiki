@@ -11,49 +11,49 @@ An excerpt of the documentation contained in the program is reproduced here:
 
 To display help and formatting options:
 
-ascii2gdocs             displays this message
+ascii2gdocs             displays this message<br>
 
-ascii2gdocs -h          displays detailed help
+ascii2gdocs -h          displays detailed help<br>
 
-ascii2gdocs -F          displays formatting options
+ascii2gdocs -F          displays formatting options<br>
 
 
 
 To add files:  use the -a option
 
 ascii2gdocs -a file<br>
-ascii2gdocs -a -
+ascii2gdocs -a -<br>
 
 
 
 To add files to folders:  separate folder names with | symbol
 
-ascii2gdocs -a "folder|names|go|here" file
+ascii2gdocs -a "folder|names|go|here" file<br>
 ascii2gdocs -a "folder|names|go|here" -
 
 
 
 To update files:  use the -u option
 
-ascii2gdocs -u file
-ascii2gdocs -u -
+ascii2gdocs -u file<br>
+ascii2gdocs -u -<br>
 
 
 
 To add files using a nondefault style:  use the -F # option
 
-ascii2gdocs -F # -a file
-ascii2gdocs -F # -a -
+ascii2gdocs -F # -a file<br>
+ascii2gdocs -F # -a -<br>
 
-ascii2gdocs -F # -a "folder|names|go|here" file
-ascii2gdocs -F # -a "folder|names|go|here" -
+ascii2gdocs -F # -a "folder|names|go|here" file<br>
+ascii2gdocs -F # -a "folder|names|go|here" -<br>
 
 
 
 To update files using a nondefault style:  use the -F # option
 
-ascii2gdocs -F # -u file
-ascii2gdocs -F # -u -
+ascii2gdocs -F # -u file<br>
+ascii2gdocs -F # -u -<br>
 
 
 To perform bulk operations:  use the - option  (see above and examples)
