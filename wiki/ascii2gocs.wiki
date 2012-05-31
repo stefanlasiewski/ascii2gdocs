@@ -4,7 +4,7 @@
 
 Documentation is self contained in the program (which is a shell script).  Run it without arguments for help.
 
-The documentation contained in the program is reproduced here:
+An excerpt of the documentation contained in the program is reproduced here:
 
 ----
 
@@ -147,10 +147,10 @@ EXAMPLE 7:
 To add more than one file, where the files are typed "interactively" 
 on the command line:
 
-ascii2gdocs -a - [hit return]
-Library/Application Support/Google/Chrome/Local State[hit return]
-.bash_profile[hit return]
-/etc/pam.d/sshd[hit return]
+ascii2gdocs -a - {{{[}}}hit return{{{]}}}
+Library/Application Support/Google/Chrome/Local State{{{[}}}hit return{{{]}}}
+.bash_profile{{{[}}}hit return{{{]}}}
+/etc/pam.d/sshd{{{[}}}hit return{{{]}}}
 ctrl-d
 
 ----
