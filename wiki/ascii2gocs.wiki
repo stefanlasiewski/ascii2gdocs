@@ -1,0 +1,5 @@
+#summary Documentation
+
+= Introduction =
+
+Documentation is self contained in the single file program (which is a shell script).  Run without arguments for help.
