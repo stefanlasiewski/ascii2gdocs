@@ -1,0 +1,1431 @@
+#!/bin/sh
+
+# ascii2gdocs version 1.0
+
+# Author:  Trever Nightingale
+ 
+# *** Copyright Notice ***
+# ascii2gdocs, Copyright (c) 2011, The Regents of the University of
+# California, through Lawrence Berkeley National Laboratory (subject to
+# receipt of any required approvals from the U.S. Dept. of Energy).  All
+# rights reserved.
+# 
+# If you have questions about your rights to use or distribute this
+# software, please contact Berkeley Lab's Technology Transfer Department
+# at  TTD@lbl.gov.
+# 
+# NOTICE.  This software is owned by the U.S. Department of Energy.  As
+# such, the U.S. Government has been granted for itself and others
+# acting on its behalf a paid-up, nonexclusive, irrevocable, worldwide
+# license in the Software to reproduce, prepare derivative works, and
+# perform publicly and display publicly.  Beginning five (5) years after
+# the date permission to assert copyright is obtained from the U.S.
+# Department of Energy, and subject to any subsequent five (5) year
+# renewals, the U.S. Government is granted for itself and others acting
+# on its behalf a paid-up, nonexclusive, irrevocable, worldwide license
+# in the Software to reproduce, prepare derivative works, distribute
+# copies to the public, perform publicly and display publicly, and to
+# permit others to do so.
+
+# *** License agreement ***
+# 
+# ascii2gdocs Copyright (c) 2011, The Regents of the University of
+# California, through Lawrence Berkeley National Laboratory (subject to
+# receipt of any required approvals from the U.S. Dept. of Energy). All
+# rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+# 
+# (1) Redistributions of source code must retain the above copyright
+# notice, this list of conditions and the following disclaimer.
+# 
+# (2) Redistributions in binary form must reproduce the above copyright
+# notice, this list of conditions and the following disclaimer in the
+# documentation and/or other materials provided with the distribution.
+# 
+# (3) Neither the name of the University of California, Lawrence
+# Berkeley National Laboratory, U.S. Dept. of Energy nor the names of
+# its contributors may be used to endorse or promote products derived
+# from this software without specific prior written permission.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# 
+# You are under no obligation whatsoever to provide any bug fixes,
+# patches, or upgrades to the features, functionality or performance of
+# the source code ("Enhancements") to anyone; however, if you choose to
+# make your Enhancements available either publicly, or directly to
+# Lawrence Berkeley National Laboratory, without imposing a separate
+# written license agreement for such Enhancements, then you hereby grant
+# the following license: a  non-exclusive, royalty-free perpetual
+# license to install, use, modify, prepare derivative works, incorporate
+# into other computer software, distribute, and sublicense such
+# enhancements or derivative works thereof, in binary and source code
+# form.
+
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#
+# Notes:
+# uses v3 Gdoc list API, plus a single v2 call for non-resumable upload
+# requires curl 7.18.0 or greater
+#
+#
+# TODO  (May 2012)
+# 1.  Code clean up.  Especially variable use (make all implied uses explicit).
+#     Script comments: identify fxns as read only to Google, or the changes
+#     the fxns make.
+# 2.  Change v2 call to v3 (use resumable but just put all at once).
+# 3.  Rework calls to Google if possible (not one call per folder, see ouch).
+#     Is it possible to eliminate curl dependency for something more universal?
+# 4.  Ongoing:  follow changes to formatting options in gdocs. 
+#     (Hopefully, need for RTF hacks goes away someday, ways to specify
+#     formatting become available since templates get clobbered via API, etc..)
+# 5.  Make curl PUT's explicit with a curl PUT argument (possible?).
+# 6.  Make sure commands aren't aliases (ls, etc.).
+# 7.  Is it feasable to specify individual formatting options from command line?
+#     (eg. -f font-name -lm left-margin, etc.)
+# 8.  Use something other than ClientLogin since it is deprecated.
+# 9.  Fix for two-step.
+#
+# Tests: 
+# send a blank line in the middle of file list (stdin)
+# a false path (to no file)
+# a dir (this has been tested, but try test again after nix'ing dir useage)
+# weird characters
+#
+# Known Bugs:
+# 1. why does:  ./ascii2gdocs 2>/dev/null   --> produce -h doc?
+#
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+# don't choke on spaces in paths:
+IFS=$'
+'
+
+#- - - VARIABLES - - - - - - - - - 
+
+# default formatting (change as desired)
+# style (1 - 8 presently, you can add up to 99 styles)
+style=1
+
+# See security info: authorization tokens stored here.  
+# auth_dir is persistent 
+auth_dir="$HOME/.ascii2gdocs"
+
+# rename/relocate if desired
+log_file="${auth_dir}/ascii2gdocs_index_`hostname`"
+
+# Do you want updates logged (in addition to logging added files)?
+log_updates="Y"
+
+# See Google's documentation at $glimits (keep this link up-to-date)
+# If maximums change, just change these variables
+# size is in bytes here (2097152 bytes = 2 megabytes)
+glimits="https://docs.google.com/support/bin/answer.py?answer=37603"
+max_goog_file_size=2097152
+max_goog_chars=1024000
+
+# For security reasons, auth_file must be in auth_dir
+auth_file="${auth_dir}/gauth"
+
+# scratch_dir is a per execution directory (see trap)
+scratch_dir="${auth_dir}/ascii2gdocstmp${$}"
+
+# password matching retries allowed
+max_crypt_tries=6
+
+# don't allow authentication variables to be inherited
+new_token="N"
+
+# this program
+a2g="`basename $0`"
+
+
+#- - - FXNS  - - - - - - - - - - -
+
+display_useage() {
+    # this fxn always exits
+    cat <<EOF
+To display help and formatting options:
+
+$a2g             displays this message
+
+$a2g -h          displays detailed help
+
+$a2g -F          displays formatting options
+
+
+
+To add files:  use the -a option
+
+$a2g -a file
+$a2g -a -
+
+
+
+To add files to folders:  separate folder names with | symbol
+
+$a2g -a "folder|names|go|here" file
+$a2g -a "folder|names|go|here" -
+
+
+
+To update files:  use the -u option
+
+$a2g -u file
+$a2g -u -
+
+
+
+To add files using a nondefault style:  use the -F # option
+
+$a2g -F # -a file
+$a2g -F # -a -
+
+$a2g -F # -a "folder|names|go|here" file
+$a2g -F # -a "folder|names|go|here" -
+
+
+
+To update files using a nondefault style:  use the -F # option
+
+$a2g -F # -u file
+$a2g -F # -u -
+
+
+To perform bulk operations:  use the - option  (see above and examples)
+
+Specifying - instead of a file name means to receive local file names from
+standard input.  Specify one filename or path ending with a filename per line.
+See examples.
+
+
+
+TIP:  Create a Google Docs folder named "ascii".  When adding ascii files using
+this program, always tag them as belonging in the "ascii" folder (plus whatever
+additional folders you wish to put them in).  This gives a way to identify all
+ascii documents when exporting (backing up) Google Docs.
+
+
+
+    ----------------------------
+
+
+
+Examples:
+
+EXAMPLE 1:
+
+To add local file ".bash_profile" to the root folder in Google Docs 
+(i.e. no folder) with default style:
+
+$a2g -a ~/.bash_profile
+
+or (equivalent)
+
+$a2g -a "folder:root" ~/.bash_profile
+
+
+
+EXAMPLE 2:
+
+To add local file ".bash_profile" to folders named "ascii", "config", and
+"hostname-foo" with default style:
+
+$a2g -a "ascii|config|hostname-foo" ~/.bash_profile
+
+
+
+Example 3:
+
+To add local file ".bash_profile" to a folder named ascii using the style 
+specified with numeral 2:
+
+$a2g -F 2 -a "ascii" ~/.bash_profile
+
+
+
+EXAMPLE 4:
+
+To update ".bash_profile" to Google Docs using default style:
+
+$a2g -u ~/.bash_profile
+
+
+
+EXAMPLE 5:
+
+To add all .sh files (shell scripts) under your home directory to folders 
+named "ascii" and "shell scripts" using the default style:
+
+find ~ -name '*.sh' -print | $a2g -a "ascii|shell scripts" -
+
+
+
+EXAMPLE 6:
+
+To add a list of files to a folder named ascii, where the list is in
+an edited file:
+
+cat >> files_to_put
+.bash_profile
+Library/Application Support/Google/Chrome/Local State
+/etc/passwd
+/etc/pam.d/sshd
+ctrl-d
+
+cat files_to_put | $a2g -a "ascii" -
+
+
+
+EXAMPLE 7:
+
+To add more than one file, where the files are typed "interactively" 
+on the command line:
+
+$a2g -a - [hit return]
+Library/Application Support/Google/Chrome/Local State[hit return]
+.bash_profile[hit return]
+/etc/pam.d/sshd[hit return]
+ctrl-d
+EOF
+    exit 1
+}
+
+display_man() {
+    # this fxn always exits
+    cat <<EOF
+Run this program without arguments for useage information.
+
+Google Docs in this documentation means the same as Google Drive.
+
+This program is intended to enable *NIX/OSX command line users to
+programmatically add or update ascii files to Google Docs.  Local ascii files
+are converted into Google documents, where they can be edited from a browser,
+shared online, worked on collaboratively, have comments and revision histories,
+are readily accessible from mobile devices, and do not use up Google Docs quota
+space.  Formatting of the Google documents can be specified, such as font, font
+size, page size, orienation, borders, text color, and other basic formatting.
+Local ascii files can be added or updated one at a time, or in batch.  Files
+can be added to one or more folders, or no folders (Google Docs "root").
+
+Google documents created with this program are given a title in Google Docs.
+The title is always identical to the local (base) file name- a different title
+can not be specified (unless changed later by other means, for example in the
+web interface).
+
+Any local file can be tried- ascii or not- and there is no requirement that
+local files have any particular suffix.  Only file size and number of
+characters are checked, to make sure users do not attempt to add or update a
+local file that Google Docs will reject, since Google limits conversion of
+files to Google Docs to certain maximums.  (2 MB at the time of this writing.)
+
+Add always creates a new Google document that did not exist before.  
+
+Update never creates a new Google document.
+
+A log file at $log_file 
+records the time (YYYYMMDDHHMMSS) of adding or updating, the Google Document's
+ID, and the full path to the local file.  (Optionally, the user can disable
+logging updates- see program source.)
+
+There is no output on the command line if there are no errors.  The user can
+watch Google Docs or tail -f $log_file to monitor progress.
+
+Various parameters (including default formatting) can be changed by the user by
+simply changing the values of variables in the source for this program (a
+Bourne shell script).
+
+This progam is intended to be highly portable among different *NIX platforms,
+with minimal dependencies (the only requirement is https enabled cURL version
+7.18.0 or higher).  It consists of a single file (shell script) that contains
+its own documentation.
+
+Multiple Google Docs accounts can be used but the user will need to use one 
+$auth_dir 
+directory per account.  It is left to the user to implement a solution, 
+different types of solutions are possible (eg. wrapper scripts).
+
+Usually, one adds a local ascii file to Google Documents only once with this
+program.  Subsequentally, if the local ascii file changes and the corresponding
+Google Document does not change, update Google Docs with the changes using this
+program.  The update will be reflected in the revision history of the
+corresponding Google Document (revision history is visible in a browser).
+
+See basic useage information, users can add documents in bulk by passing in
+files to standard input.  This allows for batch jobs that populate many
+documents, including initial migration of local files to Google Docs ("moving
+to the cloud").
+
+As its name suggests, this program is not designed to be a two way
+syncronization program between Google Documents and local ascii files.
+
+
+SECURITY: 
+
+This program should not be run with escalated privileges (not SETUID).
+
+This program encrypts all network interactions (HTTPS), does not echo passwords
+to the local screen and does not make Google account names and passwords
+visible to the local system process space (eg. ps output, history files, or
+process accounting) nor does it ever write such information to local storage.
+Google's ClientLogin facility is used, wherein after entering your Google email
+and password, a token is received that is subsequentally used.  Tokens last for
+two weeks, after which this program will prompt the user for Google account
+information again so that a new token can be obtained.  Tokens are stored
+locally in a permission protected directory.  If openssl is available on the
+local system, the option to AES-256 encrypt the token is provided (chosing to
+encrypt is strongly recommended).  Encrypted tokens are never written to the
+local system unencrypted.  Tokens (encrypted or not) are never echoed to the
+local screen nor visible to the local system process space (eg. ps output,
+history files, or process accounting).  The permission protected directory that
+holds the token is checked for proper configuration each time this program is
+run.
+
+A token does not give full access to your Google account. It does not contain
+your Google account name or password.  A token "only" gives access to your
+Google Docs.  But that is significant and this point should be emphasized:
+POSSESSION OF AN UNEXPIRED, UNENCRYPTED TOKEN PROVIDES FULL API ACCESS TO YOUR
+GOOGLE DOCS FROM ANY MACHINE(S).  For further information, see Google
+documentation at:
+http://code.google.com/apis/accounts/docs/AuthForInstalledApps.html  
+
+If you have reason to believe your unencrypted valid token has been stolen, you
+can immediately change your Google password to invalidate the token.  If the
+stolen token was already used maliciously, changing your password will prevent
+further malicious use of that token.
+
+Accounts using Google's two-step authentication will work with this program.
+Simply enter an application specific password instead of a normal gmail
+password.  Unfortunately, you will need to re-enter an application specific
+password when the token obtained with the application specific password expires
+in two weeks (the application specific password is not saved).  Future versions
+may improve upon this, especially since the author uses two-step authentication.
+
+Accounts using a Google Apps domain for business that use email addresses that
+are not of the form user@gmail.com (that are instead user@companydomain.com)
+will work with this program.  Just use the Google Apps credentials that would
+normally be used.
+
+
+FIDELITY INFORMATION:
+
+Google Docs has limited (though evolving) support for plain text, including
+limitations at the API level.  If you don't like what Google does to plain text
+given your defaults in Google Docs, you must manually adjust the formatting in
+a browser.  This is a limitation if you have many local ascii documents and
+want the corresponding Google documents to look the way they do locally, where
+fixed width fonts, indenting (eg.  programming code) and other formatting can
+be of importance.
+
+This program gives a way around the current Google Docs formatting limitations,
+using a simple trick: a short lived local copy of the local ascii file is
+created in RTF format that contains the desired formatting.  The RTF file is
+submitted to Google Docs for conversion to a Google document, then the local
+RTF file is immediately deleted.  (Note that instead of RTF, HTML <PRE> tags
+with style information could be wrapped around the original ascii content.  But
+HTML created in this way does not have all of the the formatting options that
+RTF does, and for other reasons as well RTF was chosen.)
+
+Most ascii files look faithful to the original when put into Google Docs this
+way.  Horizontal tabs may expand differently in Google Docs, but to date this
+is the only difference observed, thanks in part to another trick this program
+employs to maintain plain text fidelity: spaces are converted to non-breaking
+spaces, else Google Docs will not maintain proper indenting in ascii.
+
+Users may wonder how their original ascii files turn out if the files are
+converted into Google documents with this program, and then exported back out
+of Google Docs as plain text.  How good is round trip fidelity?
+
+Fidelity will be preserved, with the following known caveats:
+
+* Leading and trailing white space in the document is stripped out by Google. 
+
+* Any horizontal tabs (ASCII hex code 09) in the original ascii are present in
+  the Google document that is created but removed upon export from Google Docs
+  and replaced with spaces.
+
+* There is no EOL for the last line of your exported plain text file.
+
+* Text exported from Google Docs is UTF-8 (i.e. with BOM) and contains
+  Windows EOL (CR and LF).
+
+* Any spaces and other special characters present in the original file name and
+  present in the Google document title get stripped out by Google Docs upon
+  export, such that the exported local file name may not be the same as the
+  original local file name.  Exported files have a txt suffix appended to them
+  as well.
+
+All of these issues can typically be worked around programmatically.  For
+example, the following command removes the UTF-8 BOM, restores *NIX EOL (LF),
+adds a LF to the last line of the file, and removes the txt suffix:
+
+tail -c +4 < ~/testfile.txt | tr -d '\r' | sed > ~/testfile
+
+If comments are added to a Google document, exporting the document as text will
+include the comments as footnotes.  The effect is interesting, but at present
+there is no option to exclude comments when exporting.  You can make a copy of
+your document in Google Docs, that action will remove the comments, then export
+the copy which will not contain comments.
+
+
+ERROR MESSAGES:
+
+Error messages result under certain conditions and users may find it beneficial
+to understand the underlying reasons.
+
+For performance and other reasons, this program must rely upon Google folder
+names and Google document titles to select items in Google Docs.  This is not
+how Google Docs works internally, where items are identified behind-the-scenes
+by using a unique ID for each item (the ID is usually visible in the URL, but
+not elsewhere in a web browser).  This basic difference in item identification
+means that when using this program:
+
+* Users can always ADD a local ascii file to Google Docs untagged (i.e. in no
+  folder, otherwise known as root, or the folder named in the API
+  "folder:root").
+
+* Users can only ADD local ascii files to Google Docs folders that have
+  unique names in Google Docs (if adding to a folder named foo, this
+  program has no way of knowing which folder is intended if more than one
+  folder is named foo).
+
+* Users can only UPDATE a Google Doc that has a unique title in Google Docs (same
+  reasoning applies- if there is more than one Google document named README, this
+  program has no way of knowing which README the user wants to update).
+
+* ADDING a single local ascii file (eg. ~/.bash_profile) to Google Docs more
+  than once creates duplicates in Google Docs.  That is, each ADD creates a new
+  Google Document.  Each of the Google documents created will have its own unique
+  revision history, and its own ID.  But each of the Google documents will have
+  identical content and titles (at least initially, prior to any browser edits).
+
+Please Note:  Adding a local ascii file to Google Docs more than once is not
+the same as adding the local ascii file once and assigning it to more than one
+Google Docs folder.  The later is supported, it is the normal Google Docs
+"tagging" feature that this program can take full advantage of providing you do
+not have tags (i.e. folders) with the same name in Google Docs.  If you do,
+those duplicate tags can not be applied to your documents with this program.
+See basic useage examples.
+
+Also note that in the unlikely event a user creates a Google Docs folder
+with the name folder:root, documents can not be added to that folder with
+this program.  A folder with the name folder:root always refers
+unambiguously to the Google Docs document root (or "untagged") in this program.
+
+EOF
+    exit 0 
+}
+
+check_curl_ver() {
+    # need version 7.18.0 or greater because we need url-encode option
+    `which curl > /dev/null 2>&1`
+    if [ $? -ne 0 ]; then
+        echo "curl is either not installed or not in path.  Exiting" 1>&2
+        exit 1
+    else
+        curl_version=`curl -V | head -1 | awk '{print $2}' \
+                      | sed "s/\..$//" | sed "s/\\.//g"`
+        if [ $curl_version -lt 718 ]; then
+            exec 1>&2
+            echo "Requires curl version 7.18.0 or greater."
+            echo "See curl -V.  Exiting."
+            exit 1
+        fi
+    fi
+}
+
+check_perms() {
+    # perms and ownership checked
+    # Note:  ls -d works for a file too (and directories)
+    auth_owner=`ls -ldn "$1" | awk '{print $3}'`
+    current_uid=`id -u`
+    if [ "$auth_owner" -ne "$current_uid" ]; then
+        exec 1>&2
+        echo "$1 is not owned by you.  Insecure configuration, exiting."
+        exit 1
+    fi
+    chmod 700 "$1" || exit 16
+}
+
+curl_prblm_alert() {
+    exec 1>&2
+    echo "Curl failed with error $1"
+    echo "Curl failures are usually from network failures."
+    echo "Be sure the system can reach docs.google.com"
+    echo "To determine specifically what error $1 means,"
+    echo "please see the curl exit codes in the curl man page."
+    exit 1
+}
+
+check4toke_prblms() {
+    # TODO: ...this fxn wants to be refactored for a couple of reasons
+    possible_auth_error=""
+    possible_auth_error=`echo "$1" | grep '^<TITLE>' | grep '</TITLE>$'\
+                         | sed "s/^<TITLE>//" | sed "s/<\/TITLE>$//"`
+
+    # intended to exhaust possibilities; add new error msgs as necessary
+    case "$possible_auth_error" in
+        "Token expired") echo "$possible_auth_error" 1>&2;;
+        "Token invalid") echo "$possible_auth_error" 1>&2;;
+        "Authorization required") echo "$possible_auth_error" 1>&2;;
+        "Unknown authorization header") echo "$possible_auth_error" 1>&2;;
+        *) return;;
+    esac
+    rm -f ${auth_file}
+    exec 1>&2
+    echo "Your ClientLogin token issued by Google is not working."
+    echo "It may have expired (tokens only last 2 weeks)."
+    echo "Deleted ${auth_file}."
+    echo "Please run this program again."
+    echo "A new token will be issued and normal use can resume."
+    exit 1
+    # TODO: can we call create new token and resume execution?
+}
+
+check4ClientLogin_prblms() {
+    possible_login_error=""
+    possible_login_error=`echo "$1" | grep '^Error=' | sed "s/^Error=//"`
+    if [ -z "$possible_login_error" ]; then
+        return
+    elif [ "$possible_login_error" = "BadAuthentication" ]; then
+        exec 1>&2
+        echo "Google error message returned"
+        echo "Username or password not recognized."
+        echo ""
+        echo "If the wrong username or password was entered"
+        echo "run this program again to re-enter the information"
+        echo "$a2g exiting"
+        exit 1
+    elif [ "$possible_login_error" = "CaptchaRequired" ]; then
+        exec 1>&2
+        echo "Google does not trust this machine."
+        echo "Common reasons include entering a correct or"
+        echo "incorrect email address or password too many times."
+        echo "Open a web browser on this machine and go to:"
+        echo "https://www.google.com/accounts/UnlockCaptcha"
+        echo "Correctly respond to the Captcha challenge there."
+        echo "Google will then trust this machine."
+        echo "Then rerun this program."
+        echo "$a2g exiting."
+        exit 1
+    elif [ "$possible_login_error" = "ServiceUnavailable" ]; then
+        exec 1>&2
+        echo "Google login service is presently unavailable."
+        echo "Try again later."
+        echo "$a2g exiting"
+        exit 1
+    else
+        exec 1>&2
+        echo "Your login to Google did not succeed."
+        echo "Error from Google: $possible_login_error"
+        echo "Further information is available here:"
+        echo "http://code.google.com/apis/accounts/docs/AuthForInstalledApps.html"
+        echo "See the \"Error codes\" table at the bottom of the page."
+        echo ""
+        echo "Solve the Google account problem before proceeding."
+        echo "Exiting."
+        exit 1
+    fi
+    # TODO: resume execution where appropriate instead of exiting?
+}
+
+check_file_size() {
+    # Fxn expects a path to a file (ultimately ascii or rtf we assume)
+
+    # TODO:  Confirm this is correct.  How do we interpret this:
+    # https://docs.google.com/support/bin/answer.py?answer=37603
+    # The character limit seems to be for a Google doc in browser.
+    # But not just for in-browser creations, I think.
+    # Note that a plain text file less than 2MB but with character count
+    # exceeding max then uploaded manually with a browser, failed.  
+    # Does result prove this code is correct- char max's matter?
+
+    file_too_big=""
+    file_size_warning=""
+    file_length=`ls -l $1 | awk '{print $5}'`
+    file_chars=`wc -m $1 | awk '{print $1}'`
+    # how will this act if both are true?
+    if [ $file_length -gt $max_goog_file_size ]; then
+        file_too_big="Y"
+        file_size_warning="Skipping $1 because it is too large (Google will not convert to gdoc because it exceeds $max_goog_file_size).  See $glimits"
+    elif [ $file_chars -gt $max_goog_chars ]; then
+        file_too_big="Y"
+        file_size_warning="Skipping $1 because it has too many characters (Google will not convert to gdoc because character counts exceeds $max_goog_chars).  See $glimits"
+    else file_too_big="N"
+    fi
+}
+
+auth_file_create() {
+    # keeps account name and password invisible to local system  
+    # read with any args is not portable (don't use -p or -s)
+    #
+    # result of fxn is in memory GAUTH (token in wrapping)
+    #
+    # Note: TOKEN USE IS REQUIRED.
+    # We conclude this because Google states: too many authentication
+    # attempts (successful or failed) can cause a CAPTCHA error.
+    # see http://code.google.com/googleapps/faq.html
+
+    echo ""
+    echo "Obtaining Google Docs ClientLogin token.  Token lasts two weeks."
+    echo ""
+    echo "Enter Google account email address (eg. johndoe@gmail.com)"
+    echo "Email: "
+    read email_address
+    echo "Enter Google account password"
+    echo "Use application-specific password for two factor authentication"
+    echo "Password: "
+    sttyorig="`stty -g`"
+    stty -echo
+    read user_passwd
+    stty "$sttyorig"
+
+    # the lack of a back slash (making echo generate a new line) is
+    # the key below to using curl with -K - and multiple options.
+    # It's like curl config file with one parameter per physical line
+    tmp=`echo "--data-urlencode \"Passwd=$user_passwd\"
+        --data-urlencode \"Email=$email_address\"" | \
+        curl -K - -q -s \
+        -d accountType=GOOGLE \
+        -d service=writely \
+        -d source=tcn-ascii2gdocs-1 \
+        https://www.google.com/accounts/ClientLogin`
+
+    # check curl return value and check what google returns for errors
+    ctmp="$?"
+    [ "$ctmp" -ne 0 ] && curl_prblm_alert "$ctmp"
+    check4ClientLogin_prblms "$tmp"
+
+    auth_string=`echo "$tmp" | grep '^Auth=' | sed "s/^Auth=//"`
+
+    GAUTH="\"Authorization: GoogleLogin auth=${auth_string}\""
+    new_token="Y"
+}
+
+encrypt_token() {
+    # Called if openssl is detected on system.
+    # Call this fxn AFTER token newly generated and loaded into memory,
+    # but BEFORE token written to disc.
+    # Result of this fxn is encrypted token in memory or
+    # program exit with token thus gone from existance (lost for good).
+    # The unencrypted token is also in memory, and we use it for the
+    # duration of this execution so user doesn't have to decrypt what
+    # user just encrypted.
+    #
+    # we wrap openssl so that user gets $max_crypt_tries
+    # to enter the same passwd twice (openssl only gives one try)
+    # NOTE:  openssl fails if user just hits return twice (no password)
+    # but otherwise there is no password strength checking here
+    # since we don't require encryption in the first place... 
+
+    GAUTH_encrypted=""
+    crypt_tries=0
+    false
+    while [ $? -ne 0 ]
+    do
+        if [ "$crypt_tries" -ge "$max_crypt_tries" ]; then
+            exec 1>&2
+            echo "Failed to encrypt in memory token after $max_crypt_tries tries."
+            echo "Exiting- token safely destroyed."
+            exit 1
+        fi
+        crypt_tries=`expr $crypt_tries + 1`
+        # echo so token not visible on local system
+        GAUTH_encrypted=`echo "$GAUTH" | \
+                        openssl enc -aes-256-cbc -a -A -salt 2>/dev/null`
+    done
+}
+
+load_gauth() {
+    # loads the GAUTH variable value presumed to be in auth_file
+    # (GAUTH variable is used for all curls to Google)
+    # loads encrypted or unencrypted auth_file
+    # deletes $auth_file if decrypt fails
+    # loading expired/bad GAUTH is no problem (see check4tokeprblms)
+
+    # make sure we don't display token to system here:
+    check4encryption=`cut -c 2-14 "$auth_file"`
+    if [ "$check4encryption" != "Authorization" ]; then
+        # assume it's encrypted, we must decrypt
+        # most likely token was made locally with openssl
+        # but make sure we have openssl else ugly error
+        `which openssl > /dev/null 2>&1`    
+        if [ $? -ne 0 ]; then
+            exec 1>&2
+            echo "Token apparently encrypted, but"
+            echo "can't find openssl to decrypt."
+            echo "$a2g exiting."
+            exit 1
+        fi
+        GAUTH=""
+        decrypt_tries=0
+        false 
+        while [ $? -ne 0 ] 
+        do
+            if [ "$decrypt_tries" -ge "$max_crypt_tries" ]; then
+                rm -f "$auth_file"
+                exec 1>&2
+                echo "Failed to decrypt token after $max_crypt_tries tries."
+                echo "Deleted $auth_file."
+                echo "Rerun this program to generate a new token."
+                exit 1
+            fi
+            decrypt_tries=`expr $decrypt_tries + 1`
+            GAUTH="`openssl enc -d -a -A -aes-256-cbc -in $auth_file 2>/dev/null`"
+        done
+    else
+        # appears to be an un-encrypted token, ergo load it
+        GAUTH="`cat $auth_file`"
+    fi
+}
+
+get_collection_rids() {
+    # fxn is read only in Google Docs
+    # needs named pipe or some soln' (rnd trip to google per folder, ouch)
+    rm -rf ${scratch_dir}/collection_rids
+    OLDIFS=$IFS
+    IFS="|"
+    for collection_title in $input_collection_list
+    do
+        [ -z "$collection_title" ] && continue
+
+    # automatically handle if user wants folder:root (see gdoc, RID of root
+    # is always "folder:root", but upload link will be just "root") fyi we
+    # require the user to use "folder:root" to distinguish from collections
+    # with name of "root" arbitrary perhaps since we can't distinguish from
+    # collections with name of "folder:root", but the latter name seems a
+    # lot less likely
+
+        if [ "$collection_title" = "folder:root" ]; then
+            RID="root"
+        else
+            tmp=`echo "-H $GAUTH" | curl -K - -q -s --get \
+                --data-urlencode "v=3" \
+                --data-urlencode "title=$collection_title" \
+                --data-urlencode "title-exact=true" \
+                --data-urlencode "prettyprint=true" \
+                "https://docs.google.com/feeds/default/private/full/-/folder"`
+
+            # check curl return value and check what google returns for errors
+            ctmp="$?"
+            [ "$ctmp" -ne 0 ] && curl_prblm_alert "$ctmp"
+            check4toke_prblms "$tmp"
+            
+        # SPECIAL QUERY FILTER HERE Google acknowledges a bug, see
+        # https://groups.google.com/group/google-documents-list-api/browse_thread/thread/af9af73b551c5b9c
+        # Can remove the extra post query filter when bug is fixed.  Given
+        # the bug, we get back anything named according to the exact title.
+        # Thus, if you have test doc and test collection in Google, this
+        # query returns two items (not just the entry for the test
+        # collection).  Soln is to use additional resourceId filter that
+        # further grep's for the folder: attribute the Google Docs list api
+        # xml returns (grep '<gd:resourceId>folder:')
+            RID=`echo "$tmp" | grep '</gd:resourceId>$' | \
+                grep '<gd:resourceId>folder:' | \
+                awk -F":" '{print $(NF-1)}'  | sed "s/....$//"`
+        fi
+
+        num_ids=`echo "$RID" | wc -l`
+        if [ $num_ids -gt 1 ]; then
+            exec 1>&2
+            echo "More than one \"$collection_title\" collection in Google Docs."
+            echo "This program can not disambiguate that."
+            echo "If adding docs to only one instance of $collection_title,"
+            echo "a work around is to rename that instance."
+            echo "Then run this script using the new collection name."
+            echo "Further information available under ERROR MESSAGES (see help)."
+            echo "Aborting, no changes made."
+            rm -f collection_rids
+            exit 1
+        elif [ -z "$RID" ]; then
+            exec 1>&2
+            echo "No collection named $collection_title in Google Docs."
+            echo "This program does not make collections."
+            echo "Collections must be created in Google Docs."
+            echo "Aborting, no changes made."
+            # DEBUG echo "Got back:"
+            # DEBUG echo "$tmp"
+            rm -f collection_rids
+            exit 1
+        else
+        echo $RID >> ${scratch_dir}/collection_rids
+        fi
+    done
+    IFS=$OLDIFS
+}
+
+set_formatting() {
+    # If modifying, maintain "#" and other conventions here so -F works
+    # Formatting codes are RTF format.  See notes below for help.
+    if [ "$1" = 1 ]; then 
+#FORMATTING#-F 1#  "Widescreen" legal size, landscape, Consolas 10 point font with no margins
+formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw20160 \paperh12240 \margt0 \margb0 \margl0 \margr0 \landscape \f0 \fs20'
+
+    elif [ "$1" = 2 ]; then
+#FORMATTING#-F 2#  "Widescreen with margins" legal size, landscape, Consolas 10 point font with 1 inch margins
+formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw20160 \paperh12240 \margt1440 \margb1440 \margl1440 \margr1440 \landscape \f0 \fs20'
+
+    elif [ "$1" = 3 ]; then
+#FORMATTING#-F 3#  "Normal"  8.5 x 11, Consolas 11 point font with no margins
+formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw12240 \paperh16834 \margt0 \margb0 \margl0 \margr0 \f0 \fs22'
+
+    elif [ "$1" = 4 ]; then
+#FORMATTING#-F 4#  "Normal with margins"  8.5 x 11, Consolas 11 point font with 1 inch side margins and 1+ inch top/bottom margins
+formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw12240 \paperh16834 \margt1440 \margb1440 \margl1800 \margr1800 \f0 \fs22'
+
+    elif [ "$1" = 5 ]; then
+#FORMATTING#-F 5#  "A4 Widescreen"  A4, landscape, Consolas 10 point font with no margins
+formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw16834 \paperh11909 \margt0 \margb0 \margl0 \margr0 \landscape \f0 \fs20'
+
+    elif [ "$1" = 6 ]; then
+#FORMATTING#-F 6#  "A4 Widescreen with margins"  A4, landscape, Consolas 10 point font with 1 inch margins
+formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw16834 \paperh11909 \margt1440 \margb1440 \margl1440 \margr1440 \landscape \f0 \fs20'
+
+    elif [ "$1" = 7 ]; then
+#FORMATTING#-F 7#  "A4 Normal"  A4, Consolas 11 point font with no margins
+formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw11909 \paperh16834 \margt0 \margb0 \margl0 \margr0 \landscape \f0 \fs22'
+
+    elif [ "$1" = 8 ]; then
+#FORMATTING#-F 8#  "A4 Normal with margins"  A4, Consolas 11 point font with 1 inch side margins and 1+ inch top/bottom margins
+formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw11909 \paperh16834 \margt1440 \margb1440 \margl1800 \margr1800 \f0 \fs22'
+
+# Two up doesn't work in gdocs (at least not like this)
+#    elif [ "$1" = 9 ]; then
+##FORMATTING#-F 9#  "Two-up"  8.5 x 11, Consolas 10 point font, journal pre-print style
+#formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw7920 \paperh12240 \margt1800 \margb1800 \margl1440 \margr1440 \twoonone \landscape \f0 \fs20'
+#
+#    elif [ "$1" = 10 ]; then
+##FORMATTING#-F 10#  "Two-up"  A4, Consolas 10 point font, journal pre-print style
+#formatting='{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\paperw8417 \paperh11909 \margt1800 \margb1800 \margl1440 \margr1440 \twoonone \landscape \f0 \fs20'
+
+    fi
+
+# SEE PG. 60 of RTF Pocket Guide (Print ISBN-13: 978-0-596-00475-0)
+#
+# watch out for unnecessary spaces ANYWHERE in formatting, because
+# they become unintended content beginning in the first column of your doc
+# i.e., you will get mystery spaces at the very beginning of your doc (ruins
+# shell script she-bangs, etc.)
+#
+# Notes:
+# 1. regarding font size (fs):
+# fs is in half point sizes.  Double it to get the size you want.
+# Thus, for a 10 point font, you specify 20:  \fs20
+# 2.
+# paperw (paper width) and paperh (paper height) must match orientation
+# (landscape or portrait).  Dimensions are in twips.
+# 3.
+# "GREEN SCREEN" idea worked but can't see cursor properly in gdocs:
+# black page, green text, 8.5 x 11, Courier New 9 point font with half inch borders
+}
+
+prepare_sed4rtf() {
+
+    # For RTF, we need to use the RTF escape code for any pre-existing 
+    # \, {, or } in the ASCII we're converting
+
+    # sadly, indented here docs (-EOF) require tabs (bad to use so we don't)
+
+    # sed commands used below will substitute all backslashes for \'5c
+    # (except in first line which is rtf formatting codes)
+
+        cat > ${scratch_dir}/sed1.rtf<<EOF
+2,$ s/\\\/\\\'5c/g
+EOF
+    
+    # sed commands used below will substitute all { for \'7b and all } for \'7d
+    # (except in first line which is rtf formatting codes) 
+    # sed command used lastly here converts all spaces to non-breaking spaces 
+    # Why? To work around Google Doc bugs, specifically to preserve any line
+    # leading white spaces (indentations) when exporting to plain text from gdoc
+    # (only trick I found which preserves round trip fidelity!)
+
+        cat > ${scratch_dir}/sed2.rtf<<EOF
+2,$ s/{/\\\'7b/g
+2,$ s/}/\\\'7d/g
+2,$ s/ /\\\~/g
+EOF
+    
+    # sed commands used below will put a new line marker at the beginning of
+    # every new line except first two lines remember that line one is rtf
+    # codes, line two is first line of file
+
+        cat > ${scratch_dir}/sed3.rtf<<EOF
+3,$ s/^/\\\line /
+EOF
+    
+    # this temporary file will become the last line of the stream 
+
+        cat > ${scratch_dir}/lastline.rtf<<EOF
+\line
+}
+EOF
+}
+
+create_entry_in_firstcollection() {
+    # creates gdoc entry only (no content) in first collection
+    # returns gdoc's rid (which will be the same in all collections)
+    # we use the RID to add content
+
+    # Two part curl is less easy, so we put doc up in two steps: 
+    # (1) make meta entry (this fxn), then
+    # (2) put in the content (see v2google_put())
+
+    # just constructing a long string here...
+    GATOM="<?xml version=\"1.0\" encoding=\"UTF-8\"?> "
+    GATOM="${GATOM}<entry xmlns=\"http://www.w3.org/2005/Atom\""
+    GATOM="${GATOM} xmlns:docs=\"http://schemas.google.com/docs/2007\"> "
+    GATOM="${GATOM}<category scheme=\"http://schemas.google.com/g/2005#kind\" "
+    GATOM="${GATOM}term=\"http://schemas.google.com/docs/2007#document\"/> "
+    GATOM="${GATOM}<title>${gdoc_title}</title> </entry>"
+
+    first_collection_rid=`head -1 ${scratch_dir}/collection_rids`
+    gdoc_rid=""
+    tmp=`echo "-H $GAUTH" | curl -K - -q -s -X POST \
+        -H "GData-Version: 3.0" \
+        -H "Content-Type: application/atom+xml" \
+        --data-binary "$GATOM" \
+        "https://docs.google.com/feeds/default/private/full/folder%3A${first_collection_rid}/contents?prettyprint=true"`
+
+        # TODO: make this work instead of "hiding" prettyprint in above url
+        # --data-urlencode "prettyprint=true" \
+
+    # check curl return value and check what google returns for errors
+    ctmp="$?"
+    [ "$ctmp" -ne 0 ] && curl_prblm_alert "$ctmp"
+    check4toke_prblms "$tmp"
+
+    gdoc_rid=`echo "$tmp" | grep '</gd:resourceId>$' | \
+              awk -F":" '{print $(NF-1)}'  | sed "s/....$//"`
+
+    # check that entry creation succeeded
+    if [ -z $gdoc_rid ]; then
+        exec 1>&2
+        echo "Appears there was a problem attempting to create the entry for:"
+        echo "$local_doc"
+        echo "Could not get an RID from Google for it."
+        echo "Execution is aborted with no further changes."
+        echo "Got back:"
+        echo "$tmp"
+        exit 1
+    fi
+}
+
+v2google_put() {
+    # ONLY USE OF VERSION 2.0 (RESUMEABLE UPLOADS WITH CURL ARE TRICKY)
+    # takes a Google Doc RID and uploads content to that gdoc
+    return_from_content_put=""
+    GLENGTH=""
+    GLENGTH=`ls -l ${scratch_dir}/${gdoc_title}.rtf | awk '{print $5}'`
+
+    tmp=`echo "-H $GAUTH" | curl -K - -q -s -X PUT \
+        -H "GData-Version: 2.0" \
+        -H "If-Match: *" \
+        -H "Content-Length: $GLENGTH" \
+        -H "Content-Type: application/rtf" \
+        --data-binary "@${scratch_dir}/${gdoc_title}.rtf" \
+        "https://docs.google.com/feeds/media/private/full/document%3A${gdoc_rid}?prettyprint=true"`
+
+    # check curl return value and check what google returns for errors
+    ctmp="$?"
+    [ "$ctmp" -ne 0 ] && curl_prblm_alert "$ctmp"
+    check4toke_prblms "$tmp"
+
+    # doesn't work without quotes around $tmp (why?)
+    return_from_content_put=`echo "$tmp" | grep '</gd:resourceId>$' | \
+                            awk -F":" '{print $(NF-1)}'  | sed "s/....$//"`
+
+    # check that content load succeeded
+    if [ "$gdoc_rid" != "$return_from_content_put" ]; then
+        echo "There was a problem loading the content for $local_doc." 1>&2
+        echo "Got back (if next line is blank, got nothing):" 1>&2
+        echo "$tmp" 1>&2
+    fi
+
+    rm -f ${scratch_dir}/${gdoc_title}.rtf
+}
+
+get_full_path() {
+    # getting full path portably and quickly is not intuitive
+    # takes a filename and/or path as argument
+    # produces "full_path", a variable with the full path
+    dirtmp=`dirname "$1"`
+    filetmp=`basename "$1"`
+    waldo=`"pwd"`
+    cd "$dirtmp" || exit 30
+    fulldir="`pwd`"
+    cd "$waldo" || exit 31
+    full_path="${fulldir}/${filetmp}"
+}
+
+logger() {
+    # field order for human readability (filenames different lengths)
+    put_time=`date +%Y%m%d%H%M%S`
+    get_full_path "$local_doc"
+    echo "$put_time    $gdoc_rid    $full_path" >> $log_file
+}
+
+copydoc2other_collections() {
+    # needs named pipe or some soln' (rnd trip to google per folder, ouch)
+    GATOM="<?xml version='1.0' encoding='UTF-8'?> "
+    GATOM="${GATOM}<entry xmlns=\"http://www.w3.org/2005/Atom\">"
+    GATOM="${GATOM}<id>https://docs.google.com/feeds/default/private/full/document:${gdoc_rid}</id> </entry>"
+    
+    # skip first line, populated that collection already
+    for collection_rid in `sed -n '2,$p' ${scratch_dir}/collection_rids`
+    do
+        check_return_rid=""
+        tmp=`echo "-H $GAUTH" | curl -K - -q -s -X POST \
+            -H "GData-Version: 3.0" \
+            -H "Content-Type: application/atom+xml" \
+            --data-binary "$GATOM" \
+            "https://docs.google.com/feeds/default/private/full/folder%3A${collection_rid}/contents?prettyprint=true"`
+ 
+        # check curl return value and check what google returns for errors
+        ctmp="$?"
+        [ "$ctmp" -ne 0 ] && curl_prblm_alert "$ctmp"
+        check4toke_prblms "$tmp"
+ 
+        check_return_rid=`echo "$tmp" | grep '</gd:resourceId>$' | \
+                         awk -F":" '{print $(NF-1)}'  | sed "s/....$//"`
+
+
+        # check that copy succeeded
+        if [ "$gdoc_rid" != "$check_return_rid" ]; then
+            echo "There was a problem copying $local_doc into the collection:" 1>&2
+            echo "$collection_rid." 1>&2
+            echo "Got back:" 1>&2
+            echo "$tmp" 1>&2
+        fi
+    done
+}
+
+ascii2gdocrtf() {
+    # formatting defined above so user can easily alter
+  
+    # Note: html can be used to (TODO: finish documenting <PRE> experiments)
+    
+    # explicitly rtf coding tabs does not help preserve them when
+    # exporting as plain text from gdocs (bad Google!)
+    # A feature request has been submitted to Google, see:
+    # http://code.google.com/a/google.com/p/apps-api-issues/issues/detail?id=2853&thanks=2853&ts=1320301224
+    # cat - ${scratch_dir}/lastline.rtf | \
+    # awk '{gsub(/\t/, "{\\tab}"); print}' \
+
+    printf "%s\n" "$formatting" | cat - $local_doc | \
+    sed -f ${scratch_dir}/sed1.rtf | \
+    sed -f ${scratch_dir}/sed2.rtf | \
+    sed -f ${scratch_dir}/sed3.rtf | \
+    cat - ${scratch_dir}/lastline.rtf > ${scratch_dir}/${gdoc_title}.rtf
+}
+
+get_doc_rid() {
+    # fxn is read only in Google Docs
+    gdoc_rid=""
+    tmp=`echo "-H $GAUTH" | curl -K - -q -s --get \
+        --data-urlencode "v=3" \
+        --data-urlencode "title=$gdoc_title" \
+        --data-urlencode "title-exact=true" \
+        --data-urlencode "prettyprint=true" \
+        "https://docs.google.com/feeds/default/private/full"`
+
+    # check curl return value and check what google returns for errors
+    ctmp="$?"
+    [ "$ctmp" -ne 0 ] && curl_prblm_alert "$ctmp"
+    check4toke_prblms "$tmp"
+
+    gdoc_rid=`echo "$tmp" | grep '</gd:resourceId>$' | \
+             awk -F":" '{print $(NF-1)}'  | sed "s/....$//"`
+
+    num_ids=`echo "$gdoc_rid" | wc -l`
+    if [ $num_ids -gt 1 ]; then
+        exec 1>&2
+        echo "There is more than one document named $gdoc_title in Google Docs."
+        echo "This program can not disambiguate.  To update $gdoc_title,"
+        echo "rename local file to something unique, and then add it."
+        echo "Subsequent updates can then proceed using the unique name."
+        echo "Further information available under ERROR MESSAGES (see help)."
+        echo "Aborting, no changes made."
+        exit 1
+    elif [ -z "$gdoc_rid" ]; then
+        exec 1>&2
+        echo "Can not find a document named $gdoc_title in Google Docs."
+        echo "Documents must be added before they can be updated."
+        echo "This program can add documents.  See useage information."
+        # DEBUG echo "Returned from Google:"
+        # DEBUG echo "$tmp"
+        echo "Aborting, no changes made."
+        exit 1
+    fi
+}
+
+add2google() {
+    check_file_size "$local_doc"
+    if [ "$file_too_big" = "Y" ]; then
+        echo "$file_size_warning" 1>&2
+        # skip to next file if there is one
+        return
+    fi
+    gdoc_title=`basename "$local_doc"`    
+    get_collection_rids "$input_collection_list"
+    ascii2gdocrtf "$local_doc"
+    check_file_size "${scratch_dir}/${gdoc_title}.rtf"
+    if [ "$file_too_big" = "Y" ]; then
+        echo "$file_size_warning" 1>&2
+        # skip to next file if there is one
+        return
+    fi
+    create_entry_in_firstcollection "$local_doc"
+    v2google_put
+    logger
+    copydoc2other_collections $gdoc_rid
+}
+
+update2google() {
+    check_file_size "$local_doc"
+    if [ "$file_too_big" = "Y" ]; then
+        echo "$file_size_warning" 1>&2
+        # skip to next file if there is one
+        return
+    fi
+    gdoc_title=`basename "$local_doc"`
+    get_doc_rid "$gdoc_title"
+    ascii2gdocrtf "$local_doc"
+    check_file_size "${scratch_dir}/${gdoc_title}.rtf"
+    if [ "$file_too_big" = "Y" ]; then
+        echo "$file_size_warning" 1>&2
+        # skip to next file if there is one
+        return
+    fi
+    v2google_put
+    if [ "$log_updates" = "Y" ]; then
+        logger
+    fi
+}
+
+#- - - MAIN - - - - - - - - - - - - -
+# Algorithm overview:
+# For adding:
+# - get rid's of collections files will go into
+# - for each file:
+# - create a local copy in rtf form
+# - put doc into first collection, get it's rid
+# - add gdoc from first collection to any remaining collections
+# - log
+# - when done with putting docs, put copy of log in gdoc root (?)
+# For updating:
+# TODO: describe
+# In all cases: we handle checking/generating an auth token
+#- - - - - - - - - - - - - - - - - - -
+
+umask 077
+
+# check args
+# (I don't like getopts)
+
+# io  (values are: file or stdin)
+io="file"
+# action  (values are: update2google or add2google)
+action=""
+
+# no args, six args or more
+if [ "$#" -eq 0 -o "$#" -ge 6 ]; then
+    display_useage
+fi
+
+# one arg
+# possibilities:
+# -h
+# -F
+if [ "$#" -eq 1 ]; then
+    if [ "$1" = "-h" ]; then
+        display_man
+    elif [ "$1" = "-F" ]; then
+        get_full_path $0
+        echo "-F $style  default"
+        echo ""
+        grep '^#FORMATTING#' "$full_path" | awk -F'#' '{print $3 $4}'
+        echo ""
+        echo "Add or modify styles by editing source. See the set_formatting() function."
+        exit
+    else
+        # useage error if we got here
+        display_useage
+    fi
+fi
+
+# two args
+# possibilities:
+# -a file|-  (adds to root)
+# -u file|-
+if [ "$#" -eq 2 ]; then
+    case "$1" in
+        -a) action="add2google"; input_collection_list="folder:root";;
+        -u) action="update2google";;
+        *) display_useage;;
+    esac
+    if [ "$2" = "-" ]; then
+        io="stdin"
+    elif [ -r "$2" ]; then
+        io="file"
+        local_doc="$2"
+    else
+        display_useage
+    fi
+fi
+
+# three args
+# possibility:
+# -a "collections" file|-
+if [ "$#" -eq 3 ]; then
+    action="add2google"
+    input_collection_list="$2"
+    if [ "$1" != "-a" ]; then
+        display_useage
+    elif [ "$3" = "-" ]; then
+        io="stdin" 
+    elif [ -r "$3" ]; then
+        io="file"
+        local_doc="$3"
+    else 
+        display_useage
+    fi
+fi
+         
+# four args
+# possibilities:
+# -F # -a file|-  (adds to root)
+# -F # -u file|-
+if [ "$#" -eq 4 ]; then
+    style="$2"
+    if [ "$1" != "-F" ]; then
+        display_useage
+    fi
+    if [ ! "$2" -ge 1 -a ! "$2" -le 99 ]; then
+        display_usage
+    fi
+    case $3 in
+        -a) action="add2google"; input_collection_list="folder:root";;
+        -u) action="update2google";;
+        *) display_useage;;
+    esac
+    if [ "$4" = "-" ]; then
+        io="stdin"
+    elif [ -r "$4" ]; then
+        io="file"
+        local_doc="$4"
+    else
+        display_useage
+    fi
+fi
+
+# five args
+# possibility:
+# -F # -a "collections" file|-
+if [ "$#" -eq 5 ]; then
+    style="$2"
+    action="add2google"
+    input_collection_list="$4"
+    if [ "$1" != "-F" ]; then
+        display_useage
+    fi
+    if [ ! "$2" -ge 1 -a ! "$2" -le 99 ]; then
+        display_useage
+    fi
+    if [ "$3" != "-a" ]; then
+        display_useage
+    fi
+    if [ "$5" = "-" ]; then
+        io="stdin"
+    elif [ -r "$5" ]; then
+        io="file"
+        local_doc="$5"
+    else
+        display_useage
+    fi
+fi
+
+set_formatting "$style"
+check_curl_ver
+
+# Check/Get/Create authorization token
+# (i.e. get a $GAUTH)
+if [ ! -d "$auth_dir" ]; then
+    mkdir -m 700 "$auth_dir" || exit 15
+else
+    check_perms "$auth_dir"
+fi
+if [ ! -f "${auth_file}" ]; then
+    auth_file_create
+    crypt_choice=""
+    `which openssl > /dev/null 2>&1`
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "Do you want to encrypt the Google Docs token?"
+        while true
+        do  
+            echo "Encrypt token?   (y/n)"
+            read crypt_choice
+            case $crypt_choice in
+                y ) encrypt_token; break;;
+                n ) break;;
+                * ) echo "Please enter y or n";;
+            esac
+        done
+    fi
+    # in all cases crypt_choice gets defined above (tested below)
+fi
+if [ "$new_token" = "Y" ]; then
+    # echo so we don't display token to system
+    if [ "$crypt_choice" = "y" ]; then
+        echo "Writing encrypted token to ${auth_file}"
+        echo "$GAUTH_encrypted" > "${auth_file}"
+    else
+        echo "Writing un-encrypted token to ${auth_file}"
+        echo "$GAUTH" > "${auth_file}"
+    fi
+fi
+check_perms "${auth_file}"
+# If we had a token to begin with we didn't make one, so load token now.
+# Assume it's good, errors are caught later if its not (check4toke_prblms)
+if [ "$new_token" != "Y" ]; then
+    load_gauth
+fi
+# Done with Check/Get/Create authorization token
+
+mkdir $scratch_dir || exit 21
+trap "rm -rf $scratch_dir" 0 1 2 3 15
+touch $log_file || exit 22
+
+# do once now (don't redo the 4 sed files for each doc)
+prepare_sed4rtf
+
+# Here we go...
+if [ "$io" = "file" ]; then
+    $action "$local_doc"
+elif [ "$io" = "stdin" ]; then
+    # reminder: $local_doc is incorrect after read
+    # we're assigning each line of stdn to local_doc 
+    while read local_doc
+    do
+        [ -z "$local_doc" ] && continue
+        [ ! -r "$local_doc" ] && continue
+        $action "$local_doc"
+    done
+else
+    echo "No files to put.  Exiting."
+    exit 1
+fi
