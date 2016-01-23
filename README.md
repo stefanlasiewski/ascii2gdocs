@@ -19,49 +19,37 @@ An excerpt of the documentation contained in the program is reproduced here:
 
 To display help and formatting options:
 
-ascii2gdocs             displays this message<br>
-
-ascii2gdocs -h          displays detailed help<br>
-
-ascii2gdocs -F          displays formatting options<br>
-
-
+    ascii2gdocs             displays this message
+    ascii2gdocs -h          displays detailed help
+    ascii2gdocs -F          displays formatting options
 
 To add files:  use the -a option
 
-ascii2gdocs -a file<br>
-ascii2gdocs -a -<br>
-
-
+    ascii2gdocs -a file
+    ascii2gdocs -a -
 
 To add files to folders:  separate folder names with | symbol
 
-ascii2gdocs -a "folder|names|go|here" file<br>
-ascii2gdocs -a "folder|names|go|here" -
-
-
+    ascii2gdocs -a "folder|names|go|here" file
+    ascii2gdocs -a "folder|names|go|here" -
 
 To update files:  use the -u option
 
-ascii2gdocs -u file<br>
-ascii2gdocs -u -<br>
-
-
+    ascii2gdocs -u file
+    ascii2gdocs -u -
 
 To add files using a nondefault style:  use the -F # option
 
-ascii2gdocs -F # -a file<br>
-ascii2gdocs -F # -a -<br>
+    ascii2gdocs -F # -a file
+    ascii2gdocs -F # -a -
 
-ascii2gdocs -F # -a "folder|names|go|here" file<br>
-ascii2gdocs -F # -a "folder|names|go|here" -<br>
-
-
+    ascii2gdocs -F # -a "folder|names|go|here" file
+    ascii2gdocs -F # -a "folder|names|go|here" -
 
 To update files using a nondefault style:  use the -F # option
 
-ascii2gdocs -F # -u file<br>
-ascii2gdocs -F # -u -<br>
+    ascii2gdocs -F # -u file
+    ascii2gdocs -F # -u -
 
 
 To perform bulk operations:  use the - option  (see above and examples)
@@ -70,19 +58,12 @@ Specifying - instead of a file name means to receive local file names from
 standard input.  Specify one filename or path ending with a filename per line.
 See examples.
 
-
-
 TIP:  Create a Google Docs folder named "ascii".  When adding ascii files using
 this program, always tag them as belonging in the "ascii" folder (plus whatever
 additional folders you wish to put them in).  This gives a way to identify all
 ascii documents when exporting (backing up) Google Docs.
 
-
-
- ----
-
-
-
+----
 
 Examples:
 
@@ -91,46 +72,38 @@ EXAMPLE 1:
 To add local file ".bash_profile" to the root folder in Google Docs 
 (i.e. no folder) with default style:
 
-ascii2gdocs -a ~/.bash_profile
+    ascii2gdocs -a ~/.bash_profile
 
 or (equivalent)
 
-ascii2gdocs -a "folder:root" ~/.bash_profile
-
-
+    ascii2gdocs -a "folder:root" ~/.bash_profile
 
 EXAMPLE 2:
 
 To add local file ".bash_profile" to folders named "ascii", "config", and
 "hostname-foo" with default style:
 
-ascii2gdocs -a "ascii|config|hostname-foo" ~/.bash_profile
-
-
+    ascii2gdocs -a "ascii|config|hostname-foo" ~/.bash_profile
 
 Example 3:
 
 To add local file ".bash_profile" to a folder named ascii using the style 
 specified with numeral 2:
 
-ascii2gdocs -F 2 -a "ascii" ~/.bash_profile
-
-
+    ascii2gdocs -F 2 -a "ascii" ~/.bash_profile
 
 EXAMPLE 4:
 
 To update ".bash_profile" to Google Docs using default style:
 
-ascii2gdocs -u ~/.bash_profile
-
-
+    ascii2gdocs -u ~/.bash_profile
 
 EXAMPLE 5:
 
 To add all .sh files (shell scripts) under your home directory to folders 
 named "ascii" and "shell scripts" using the default style:
 
-find ~ -name '{{{*}}}.sh' -print | ascii2gdocs -a "ascii|shell scripts" -
+    find ~ -name '{{{*}}}.sh' -print | ascii2gdocs -a "ascii|shell scripts" -
 
 ----
 
