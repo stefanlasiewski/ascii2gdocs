@@ -1,5 +1,7 @@
 # ascii2gdocs
 
+(NOTE: This is an old project created by a former colleague. In 2015, I migrated this from Google Code to Github for posterity.)
+
 Enables *NIX/OSX command line users to add or update ascii files to Google Docs. Local ascii files are converted into Google documents, where they can be edited from a browser, shared online, worked on collaboratively, have comments and revision histories, are readily accessible from mobile devices, and do not use up Google Docs quota space. Formatting of the Google documents can be specified, such as font, font size, page size, orienation, borders, text color, and other basic formatting. Local ascii files can be added or updated one at a time, or in batch. Files can be added to one or more folders, or no folders (Google Docs "root").
 
 Original author: Trever Nightingale at Lawrence Berkeley National Laboratory.
